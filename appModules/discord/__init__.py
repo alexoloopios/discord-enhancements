@@ -850,6 +850,20 @@ class AppModule(appModuleHandler.AppModule):
 		Return False -> block the gesture (swallow it).
 		Return True  -> continue normal processing.
 		"""
+		# Self-heal: NVDA does not always deliver event_appModule_loseFocus
+		# (for example when the Discord window is closed or destroyed while
+		# focused).  If that happens this captor stays installed in
+		# inputCore.manager._captureFunc, which silently breaks any global
+		# feature relying on that slot being free -- most visibly the Input
+		# Gestures dialog, whose "Add" handler returns early when
+		# _captureFunc is already set.  Whenever a gesture arrives and Discord
+		# is no longer the focused app, release the slot and pass the key on.
+		focus = api.getFocusObject()
+		if focus is None or focus.appModule is not self:
+			if inputCore.manager._captureFunc is self._discordCaptor:
+				inputCore.manager._captureFunc = None
+			self._layerActive = False
+			return True
 		# Track interaction time so the poll thread can back off
 		# during active navigation (avoids UIA COM contention).
 		self._lastInteractionTime = time.time()
