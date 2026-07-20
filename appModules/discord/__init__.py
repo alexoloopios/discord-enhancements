@@ -76,6 +76,24 @@ _STATUS_SUFFIXES_LOWER = (
 # Standalone timestamp pattern like "9:04 AM"
 _TIMESTAMP_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)?$', re.IGNORECASE)
 
+# Discord occasionally puts its entire window's accessible name after a
+# short notification.  This stable run of title-bar controls marks where
+# that unrelated UI begins.
+_DISCORD_CHROME_TAIL_RE = re.compile(
+	r"\s+go back\s+go forward\s+minimize\s+maximize\s+close(?:\s+|$)",
+	re.IGNORECASE,
+)
+
+
+def _trimDiscordChrome(text):
+	"""Remove a Discord window chrome suffix from an event announcement."""
+	if not text:
+		return text
+	match = _DISCORD_CHROME_TAIL_RE.search(text)
+	if match:
+		return text[:match.start()].strip()
+	return text.strip()
+
 
 # ---------------------------------------------------------------------------
 # Thread-safe command execution
@@ -222,6 +240,10 @@ class AppModule(appModuleHandler.AppModule):
 		self._layerStartTime = 0.0
 		self._exploreIndex = -1
 		self._lastExplored = None
+		# Keep one stable bound-method object for the lifetime of the module.
+		# Accessing self._discordCaptor repeatedly creates new bound-method
+		# objects, which makes identity checks against _captureFunc unreliable.
+		self._captureFunction = self._discordCaptor
 
 		# UIA polling state (background thread owns the poll loop;
 		# main-thread Alt+N shortcuts use these for their own cache)
@@ -245,7 +267,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._pollStopEvent.set()  # wake thread so it exits
 		if self._pollThread:
 			self._pollThread.join(timeout=2.0)
-		if inputCore.manager._captureFunc == self._discordCaptor:
+		if inputCore.manager._captureFunc is self._captureFunction:
 			inputCore.manager._captureFunc = None
 		self._layerActive = False
 		super().terminate()
@@ -256,12 +278,12 @@ class AppModule(appModuleHandler.AppModule):
 
 	def event_appModule_gainFocus(self):
 		"""Discord gained focus -- activate the capture function."""
-		inputCore.manager._captureFunc = self._discordCaptor
+		inputCore.manager._captureFunc = self._captureFunction
 
 	def event_appModule_loseFocus(self):
 		"""Discord lost focus -- deactivate capture, exit layer."""
 		self._exitCommandLayer(silent=True)
-		if inputCore.manager._captureFunc == self._discordCaptor:
+		if inputCore.manager._captureFunc is self._captureFunction:
 			inputCore.manager._captureFunc = None
 
 	# ------------------------------------------------------------------
@@ -820,22 +842,26 @@ class AppModule(appModuleHandler.AppModule):
 	# ------------------------------------------------------------------
 
 	def event_liveRegionChange(self, obj, nextHandler):
-		"""Announce live-region updates (incoming chat messages)."""
+		"""Replace Discord's over-broad live-region announcement.
+
+		Discord sometimes exposes the application root as the changed live
+		region.  NVDA's default handler then speaks the notification followed
+		by names from most of the window.  This add-on already owns Discord
+		message announcements, so deliberately don't call nextHandler here.
+		"""
 		if self._shouldAnnounce():
 			text = uia.safe_name(obj) or ""
 			if not text:
 				text = uia.read_message_content(obj)
 			if text and text != "(empty message)":
-				self._filterAndAnnounce(text)
-		nextHandler()
+				self._filterAndAnnounce(_trimDiscordChrome(text))
 
 	def event_alert(self, obj, nextHandler):
-		"""Announce alert elements (notifications, toasts)."""
+		"""Replace Discord's default alert announcement with filtered text."""
 		if self._shouldAnnounce():
 			text = uia.safe_name(obj) or uia.safe_value(obj) or ""
 			if text:
-				self._filterAndAnnounce(text)
-		nextHandler()
+				self._filterAndAnnounce(_trimDiscordChrome(text))
 
 	# ------------------------------------------------------------------
 	# Master capture function -- handles ALL command-layer logic
@@ -856,11 +882,12 @@ class AppModule(appModuleHandler.AppModule):
 		# inputCore.manager._captureFunc, which silently breaks any global
 		# feature relying on that slot being free -- most visibly the Input
 		# Gestures dialog, whose "Add" handler returns early when
-		# _captureFunc is already set.  Whenever a gesture arrives and Discord
-		# is no longer the focused app, release the slot and pass the key on.
-		focus = api.getFocusObject()
-		if focus is None or focus.appModule is not self:
-			if inputCore.manager._captureFunc is self._discordCaptor:
+		# _captureFunc is already set.  Use the Win32 foreground process here:
+		# NVDA's cached focus object can briefly be None or a proxy object while
+		# Discord still has focus, which previously disabled the command layer
+		# before its Tab key could be handled.
+		if self._isDiscordForeground() is False:
+			if inputCore.manager._captureFunc is self._captureFunction:
 				inputCore.manager._captureFunc = None
 			self._layerActive = False
 			return True
@@ -889,6 +916,22 @@ class AppModule(appModuleHandler.AppModule):
 		except Exception:
 			log.error("Discord captor error", exc_info=True)
 			return True  # On error, let the key through
+
+	def _isDiscordForeground(self):
+		"""Return whether Discord owns the foreground window, or None if unknown."""
+		try:
+			hwnd = ctypes.windll.user32.GetForegroundWindow()
+			if not hwnd:
+				return None
+			pid = ctypes.wintypes.DWORD()
+			ctypes.windll.user32.GetWindowThreadProcessId(
+				hwnd, ctypes.byref(pid))
+			if not pid.value:
+				return None
+			return pid.value == self.processID
+		except Exception:
+			# A failed foreground query must not break input in Discord.
+			return None
 
 	# ------------------------------------------------------------------
 	# Prefix gesture detection
