@@ -240,6 +240,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._layerStartTime = 0.0
 		self._exploreIndex = -1
 		self._lastExplored = None
+		self._exploreAnnouncementSerial = 0
 		# Keep one stable bound-method object for the lifetime of the module.
 		# Accessing self._discordCaptor repeatedly creates new bound-method
 		# objects, which makes identity checks against _captureFunc unreliable.
@@ -978,6 +979,8 @@ class AppModule(appModuleHandler.AppModule):
 		self._layerActive = False
 		self._exploreIndex = -1
 		self._lastExplored = None
+		# Invalidate any delayed Tab announcement which has not run yet.
+		self._exploreAnnouncementSerial += 1
 		if not silent:
 			tones.beep(*_TONE_EXIT)
 
@@ -1074,7 +1077,7 @@ class AppModule(appModuleHandler.AppModule):
 			tones.beep(*_TONE_WRAP)
 		key, desc = _EXPLORE_LIST[self._exploreIndex]
 		self._lastExplored = _COMMAND_MAP.get(key)
-		ui.message("%s: %s" % (key, desc))
+		self._announceExploredCommand(key, desc)
 
 	def _explorePrev(self):
 		if not _EXPLORE_LIST:
@@ -1085,4 +1088,26 @@ class AppModule(appModuleHandler.AppModule):
 			tones.beep(*_TONE_WRAP)
 		key, desc = _EXPLORE_LIST[self._exploreIndex]
 		self._lastExplored = _COMMAND_MAP.get(key)
-		ui.message("%s: %s" % (key, desc))
+		self._announceExploredCommand(key, desc)
+
+	def _announceExploredCommand(self, key, desc):
+		"""Announce a Tab selection after the current input cycle finishes.
+
+		A synchronous ui.message can be interrupted by UI or speech work still
+		finishing for the captured Tab gesture.  NVDA's newer ui.delayedMessage
+		uses the same one-millisecond delay; callLater keeps this compatible
+		with the add-on's minimum supported NVDA version.  The serial prevents
+		a superseded announcement from speaking after a rapid second Tab.
+		"""
+		self._exploreAnnouncementSerial += 1
+		serial = self._exploreAnnouncementSerial
+		message = "%s: %s" % (key, desc)
+
+		def _announce():
+			if (
+				self._layerActive
+				and serial == self._exploreAnnouncementSerial
+			):
+				ui.message(message, speechPriority=speech.Spri.NOW)
+
+		core.callLater(1, _announce)
