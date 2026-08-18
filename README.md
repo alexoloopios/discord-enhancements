@@ -52,7 +52,9 @@ Current Discord builds expose their top-level window to NVDA natively, so NVDA a
 | `[` `E` | Move focus to the message input box |
 | `[` `S` | Move focus to the server list |
 | `[` `N` | Cycle focus among Discord areas (servers → channels → chat → members → user area) |
+| `[` `Shift+N` | Cycle focus backward through the same areas |
 | `[` `U` | Move focus to the user area |
+| `[` `I` | Open the Inbox (falls back to Discord's `Control+I`) |
 
 ### Chat Message Navigation (Home-Row Keys)
 
@@ -82,6 +84,8 @@ Current Discord builds expose their top-level window to NVDA natively, so NVDA a
 | `[` `Shift+K` or `Shift+Numpad 5` | Move real focus to the current message |
 | `[` `Shift+P` | Open pinned messages |
 | `[` `Shift+T` | Toggle the thread list |
+| `[` `Shift+V` | Show the current message in a browseable window |
+| `[` `Shift+D` | Toggle automatic announcement of incoming messages |
 
 ### Recent Messages by Number
 
@@ -104,6 +108,8 @@ Current Discord builds expose their top-level window to NVDA natively, so NVDA a
 |------|--------|
 | `[` `T` | Announce who is typing and slow-mode status |
 | `[` `W` | Announce channel info (topic, server name, DM details) |
+| `[` `Q` | Announce the add-on version and the active prefix key |
+| `[` `F1` | Open this documentation in your browser |
 
 ### Other Gestures
 
@@ -111,6 +117,18 @@ Current Discord builds expose their top-level window to NVDA natively, so NVDA a
 |------|--------|
 | `NVDA+T` | Enhanced window title (server, channel, mute/deafen, voice, badges, alerts) |
 | `NVDA+Space` | Toggle browse mode on/off (standard NVDA command) |
+| `Alt+1` – `Alt+9` | Read the 1st through 9th most recent message, without the prefix key |
+| `Alt+0` | Read the 10th most recent message |
+
+### Diagnostics
+
+These dump what the add-on can see of Discord's accessibility tree, for reporting a problem.
+
+| Keys | Action |
+|------|--------|
+| `[` `Ctrl+E` | Dump the accessibility tree to a browseable window |
+| `[` `Ctrl+M` | Message list diagnostic |
+| `[` `Ctrl+L` | Log accessibility events for 15 seconds |
 
 ---
 
@@ -135,6 +153,10 @@ When a message arrives in a server or DM you are not currently viewing, Discord 
 ### Verbosity Level
 
 Controls how much detail is reported for various UI elements:
+
+- Below **Normal**, a message read drops its "message N of M" position, and the sidebar extras below are switched off.
+- At **Verbose** and above, reading a message also reports its reactions and any poll results.
+- At **Normal** and above, servers with someone in a voice channel are announced as such in the server list, and moving into a new section of a sidebar announces that section's heading.
 
 - **Minimal (0)** — bare essentials only
 - **Normal (1)** — recommended for most users (default)

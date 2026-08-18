@@ -95,7 +95,9 @@
 	<tr><td><kbd>[</kbd> <kbd>E</kbd></td><td>Move focus to the message input box</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>S</kbd></td><td>Move focus to the server list</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>N</kbd></td><td>Cycle focus among Discord areas (servers → channels → chat → members → user area)</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Shift+N</kbd></td><td>Cycle focus backward through the same areas</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>U</kbd></td><td>Move focus to the user area</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>I</kbd></td><td>Open the Inbox (falls back to Discord's <kbd>Control+I</kbd>)</td></tr>
 </table>
 
 <h3>Chat Message Navigation (Home-Row Keys)</h3>
@@ -125,6 +127,8 @@
 	<tr><td><kbd>[</kbd> <kbd>Shift+K</kbd> or <kbd>Shift+Numpad 5</kbd></td><td>Move real focus to the current message</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>Shift+P</kbd></td><td>Open pinned messages</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>Shift+T</kbd></td><td>Toggle the thread list</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Shift+V</kbd></td><td>Show the current message in a browseable window</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Shift+D</kbd></td><td>Toggle automatic announcement of incoming messages</td></tr>
 </table>
 
 <h3>Recent Messages by Number</h3>
@@ -147,6 +151,8 @@
 	<tr><th>Keys</th><th>Action</th></tr>
 	<tr><td><kbd>[</kbd> <kbd>T</kbd></td><td>Announce who is typing and slow-mode status</td></tr>
 	<tr><td><kbd>[</kbd> <kbd>W</kbd></td><td>Announce channel info (topic, server name, DM details)</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Q</kbd></td><td>Announce the add-on version and the active prefix key</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>F1</kbd></td><td>Open this documentation in your browser</td></tr>
 </table>
 
 <h3>Other Gestures</h3>
@@ -154,6 +160,20 @@
 	<tr><th>Keys</th><th>Action</th></tr>
 	<tr><td><kbd>NVDA+T</kbd></td><td>Enhanced window title (server, channel, mute/deafen, voice, badges, alerts)</td></tr>
 	<tr><td><kbd>NVDA+Space</kbd></td><td>Toggle browse mode on/off (standard NVDA command)</td></tr>
+	<tr><td><kbd>Alt+1</kbd> &ndash; <kbd>Alt+9</kbd></td><td>Read the 1st through 9th most recent message, without the prefix key</td></tr>
+	<tr><td><kbd>Alt+0</kbd></td><td>Read the 10th most recent message</td></tr>
+</table>
+
+<h3>Diagnostics</h3>
+<p>
+	These dump what the add-on can see of Discord's accessibility tree,
+	for reporting a problem.
+</p>
+<table>
+	<tr><th>Keys</th><th>Action</th></tr>
+	<tr><td><kbd>[</kbd> <kbd>Ctrl+E</kbd></td><td>Dump the accessibility tree to a browseable window</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Ctrl+M</kbd></td><td>Message list diagnostic</td></tr>
+	<tr><td><kbd>[</kbd> <kbd>Ctrl+L</kbd></td><td>Log accessibility events for 15 seconds</td></tr>
 </table>
 
 <hr>
@@ -197,7 +217,14 @@
 
 <h3>Verbosity Level</h3>
 <p>
-	Controls how much detail is reported for various UI elements:
+	Controls how much detail is reported for various UI elements.
+	Below <strong>Normal</strong>, a message read drops its
+	"message N of M" position and the sidebar extras are switched off.
+	At <strong>Normal</strong> and above, servers with someone in a voice
+	channel are announced as such in the server list, and moving into a
+	new section of a sidebar announces that section's heading.  At
+	<strong>Verbose</strong> and above, reading a message also reports
+	its reactions and any poll results.
 </p>
 <ul>
 	<li><strong>Minimal (0)</strong> — bare essentials only</li>
