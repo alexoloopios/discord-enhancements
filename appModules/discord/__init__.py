@@ -4,7 +4,6 @@
 # This is the main entry point.  It:
 #   - Disables browse mode by default for Discord
 #   - Provides a configurable command layer (prefix key) via _captureFunc
-#   - Appends "window" to the Discord title for clarity
 #   - Registers overlay classes for enhanced speech
 #   - Announces incoming chat messages via live-region events
 #
@@ -288,44 +287,6 @@ class AppModule(appModuleHandler.AppModule):
 			inputCore.manager._captureFunc = None
 
 	# ------------------------------------------------------------------
-	# Window title enrichment
-	# ------------------------------------------------------------------
-
-	def event_NVDAObject_init(self, obj):
-		"""Append ' window' to the Discord top-level window title.
-
-		PERFORMANCE: only checks immediate properties -- O(1).
-		"""
-		try:
-			cls = getattr(obj, "windowClassName", "")
-			if cls != "Chrome_WidgetWin_1":
-				return
-			parent = getattr(obj, "parent", None)
-			if not parent:
-				return
-			# Top-level window: parent is the Desktop (has no parent
-			# itself, or its role is PANE / WINDOW).
-			try:
-				is_top_level = parent.parent is None
-			except Exception:
-				is_top_level = False
-			if not is_top_level:
-				try:
-					parent_role = parent.role
-					is_top_level = parent_role in (
-						controlTypes.Role.PANE,
-						controlTypes.Role.WINDOW,
-					)
-				except Exception:
-					pass
-			if is_top_level:
-				name = obj.name or ""
-				if name and "discord" in name.lower() and not name.endswith("window"):
-					obj.name = name + " window"
-		except (COMError, AttributeError, Exception):
-			pass
-
-	# ------------------------------------------------------------------
 	# Enhanced title script (NVDA+T override)
 	# ------------------------------------------------------------------
 
@@ -369,10 +330,10 @@ class AppModule(appModuleHandler.AppModule):
 		for alert in context.get("alerts", []):
 			parts.append(alert)
 
-		title = ", ".join(parts)
-		if not title.lower().endswith("window"):
-			title += " window"
-		ui.message(title)
+		# Discord's own Electron build now exposes the top-level window
+		# with a role NVDA already reports as a window, so appending the
+		# word here would make NVDA say it twice.
+		ui.message(", ".join(parts))
 
 	script_title.__doc__ = "Report enhanced Discord window title"
 	script_title.category = "Discord Enhancements"

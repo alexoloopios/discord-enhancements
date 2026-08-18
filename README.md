@@ -31,7 +31,7 @@ While the command layer is active, press `Tab` or `Shift+Tab` to cycle through a
 
 ### Window Title
 
-When the Discord window is focused, NVDA reports the title with a *window* suffix (e.g. "My Server — Discord window"). Pressing `NVDA+T` gives an enhanced title that includes server name, channel, mute/deafen status, voice channel, badge counts, and on-screen alerts.
+Current Discord builds expose their top-level window to NVDA natively, so NVDA already reports it as a window; this add-on no longer adds a *window* suffix of its own. Pressing `NVDA+T` gives an enhanced title that includes server name, channel, mute/deafen status, voice channel, badge counts, and on-screen alerts.
 
 ---
 
