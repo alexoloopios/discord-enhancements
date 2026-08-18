@@ -10,13 +10,22 @@
 # when the user actually lands on or reads an object, not when one is
 # built.  Keep that work bounded all the same: a person arrowing through
 # the member list generates one call per item.
+#
+# BASE CLASS: these are mixins over NVDAObject, never over a specific
+# backend class.  Discord is Chromium, and NVDA represents Chromium
+# through IAccessible2 — an overlay deriving from NVDAObjects.UIA.UIA
+# would land ahead of IAccessible in the method resolution order and
+# every inherited property getter would then look for a UIAElement the
+# object does not have.  NVDAObject sits at the end of every MRO, so
+# deriving from it overrides exactly what is written below and nothing
+# else.
 
 from comtypes import COMError
 from logHandler import log
 import config
 import controlTypes
 import ui
-from NVDAObjects.UIA import UIA
+from NVDAObjects import NVDAObject
 from . import uia
 
 
@@ -28,11 +37,30 @@ def _verbosity():
 		return 1
 
 
+class _DiscordOverlay(NVDAObject):
+	"""Common base for the overlays below.
+
+	Everything here inherits _backendName, which is the only safe way to
+	read an object's real name from inside a _get_name override: NVDA fills
+	the property cache after the getter returns, so self.name would call
+	the getter again and recurse until the stack runs out.  The zero-argument
+	super() resolves against this class, and every backend class sits after
+	it in the method resolution order, so the call lands on the IAccessible
+	(or UIA) getter the object actually came with.
+	"""
+
+	def _backendName(self):
+		try:
+			return super()._get_name() or ""
+		except (COMError, AttributeError, Exception):
+			return ""
+
+
 # ---------------------------------------------------------------------------
 # Server tree item overlay
 # ---------------------------------------------------------------------------
 
-class DiscordServerItem(UIA):
+class DiscordServerItem(_DiscordOverlay):
 	"""Overlay for server/guild items in the server navigation list.
 
 	Adds the voice indicator the JAWS scripts report while arrowing the
@@ -41,11 +69,11 @@ class DiscordServerItem(UIA):
 	"""
 
 	def _get_name(self):
-		base = uia.base_name(self)
+		base = self._backendName()
 		if _verbosity() < 1:
 			return base
 		try:
-			if uia.has_voice_activity(self):
+			if uia.has_voice_activity(self, name=base):
 				return base + ", voice active"
 		except (COMError, Exception):
 			pass
@@ -56,11 +84,23 @@ class DiscordServerItem(UIA):
 # Chat message item overlay
 # ---------------------------------------------------------------------------
 
-class DiscordMessageItem(UIA):
-	"""Overlay for individual chat messages in the message list."""
+class DiscordMessageItem(_DiscordOverlay):
+	"""Overlay for individual chat messages in the message list.
+
+	Discord usually names the article itself with the whole message, in
+	which case this changes nothing.  When it does not — some embeds and
+	attachments leave the article unnamed — assemble the text from the
+	children rather than letting NVDA report an empty message.
+	"""
 
 	def _get_name(self):
-		return uia.read_message_content(self)
+		base = self._backendName()
+		if base:
+			return base
+		try:
+			return uia.read_message_content(self, name=base, fallback="")
+		except (COMError, Exception):
+			return base
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +115,7 @@ class DiscordMessageItem(UIA):
 _lastSection = None
 
 
-class DiscordSectionedListItem(UIA):
+class DiscordSectionedListItem(_DiscordOverlay):
 	"""Overlay for sidebar items that live under a section heading."""
 
 	#: How far back to look for the heading before giving up.  Each step is
@@ -111,7 +151,6 @@ class DiscordSectionedListItem(UIA):
 				log.debugWarning(
 					"Discord: section heading lookup failed", exc_info=True)
 		super().event_gainFocus()
-
 
 
 # ---------------------------------------------------------------------------

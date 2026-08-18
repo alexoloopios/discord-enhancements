@@ -293,10 +293,19 @@ def base_name(obj):
 	class is attached.  Two of this add-on's overlays compute their name
 	from the object itself, so going back through obj.name from inside them
 	-- or from a helper they call -- re-enters the getter before its cache
-	is populated and recurses until the stack runs out.  Read the underlying
-	UIA name instead, and fall back to obj.name for anything that is not a
-	UIA object.
+	is populated and recurses until the stack runs out.  Ask the backend
+	directly instead: IA2 for Discord's own objects, UIA for the wrapper
+	elements this module builds, and obj.name only for anything neither
+	applies to.
+
+	Callers that already hold the object's real name should pass it to the
+	helper rather than relying on this, which is why read_message_content()
+	and has_voice_activity() take a *name* argument.
 	"""
+	try:
+		return obj.IAccessibleObject.accName(obj.IAccessibleChildID) or ""
+	except (COMError, AttributeError, Exception):
+		pass
 	try:
 		return obj.UIAElement.CurrentName or ""
 	except (COMError, AttributeError, Exception):
@@ -1437,8 +1446,15 @@ def get_messages(message_list=None):
 	return messages
 
 
-def read_message_content(msg_obj):
-	name = base_name(msg_obj)
+def read_message_content(msg_obj, name=None, fallback="(empty message)"):
+	"""Return the text of a message, assembling it from children if needed.
+
+	*name* lets a caller that already knows the object's own name skip the
+	lookup -- the message overlay does, because reading it back from inside
+	its own name getter would recurse.
+	"""
+	if name is None:
+		name = base_name(msg_obj)
 	if name:
 		return name
 	parts = []
@@ -1450,7 +1466,7 @@ def read_message_content(msg_obj):
 			val = safe_value(child)
 			if val:
 				parts.append(val)
-	return " ".join(parts) if parts else "(empty message)"
+	return " ".join(parts) if parts else fallback
 
 
 def get_server_items(server_list=None):
@@ -1471,15 +1487,18 @@ def get_server_items(server_list=None):
 	return items
 
 
-def has_voice_activity(server_obj):
+def has_voice_activity(server_obj, name=None):
 	"""Check if a server icon has voice/live activity indicators.
 
 	Discord lists voice participants as child elements of the server
 	item — they're just usernames like '343florida2014'.  We detect
 	this by filtering out known non-participant children (badges,
 	the server name itself, etc.) and checking if any remain.
+
+	*name* is the server's own name; the server overlay passes the one it
+	already has so this never reads it back through the overlay.
 	"""
-	server_name = base_name(server_obj).lower()
+	server_name = (name if name is not None else base_name(server_obj)).lower()
 
 	# Patterns for children that are NOT voice participants
 	_BADGE_PATTERNS = (
