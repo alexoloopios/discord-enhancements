@@ -5,13 +5,27 @@
 # NVDA object created while Discord is focused.  It MUST be O(1) —
 # only checking the object's own immediate properties (role, name).
 # NEVER walk parents, siblings, or children here.
+#
+# The overlays themselves may do more work, because their hooks run only
+# when the user actually lands on or reads an object, not when one is
+# built.  Keep that work bounded all the same: a person arrowing through
+# the member list generates one call per item.
 
 from comtypes import COMError
 from logHandler import log
+import config
 import controlTypes
 import ui
 from NVDAObjects.UIA import UIA
 from . import uia
+
+
+def _verbosity():
+	"""Return the configured verbosity level (0 minimal .. 3 extra verbose)."""
+	try:
+		return config.conf["discordAddon"]["verbosityLevel"]
+	except (KeyError, Exception):
+		return 1
 
 
 # ---------------------------------------------------------------------------
@@ -19,27 +33,23 @@ from . import uia
 # ---------------------------------------------------------------------------
 
 class DiscordServerItem(UIA):
-	"""Overlay for server/guild items in the server navigation list."""
+	"""Overlay for server/guild items in the server navigation list.
+
+	Adds the voice indicator the JAWS scripts report while arrowing the
+	server tree, so a server with someone in a voice channel is
+	distinguishable without opening it.
+	"""
 
 	def _get_name(self):
-		base = uia.safe_name(self) or ""
+		base = uia.base_name(self)
+		if _verbosity() < 1:
+			return base
 		try:
 			if uia.has_voice_activity(self):
 				return base + ", voice active"
-		except Exception:
+		except (COMError, Exception):
 			pass
 		return base
-
-
-# ---------------------------------------------------------------------------
-# Channel list item overlay
-# ---------------------------------------------------------------------------
-
-class DiscordChannelItem(UIA):
-	"""Overlay for channel items in the channel sidebar."""
-
-	def _get_name(self):
-		return uia.safe_name(self) or ""
 
 
 # ---------------------------------------------------------------------------
@@ -54,34 +64,54 @@ class DiscordMessageItem(UIA):
 
 
 # ---------------------------------------------------------------------------
-# Members list item overlay
+# Sectioned list item overlay
 # ---------------------------------------------------------------------------
 
-class DiscordMemberItem(UIA):
-	"""Overlay for items in the Members sidebar.
+# Discord groups its sidebars under headings -- "Online — 5" in the member
+# list, a category name in the channel list.  The heading is a sibling
+# rather than an ancestor, so NVDA does not report it on its own.  Track
+# the last one announced and speak it only when the section changes;
+# repeating it for every item in a long member list would bury the names.
+_lastSection = None
 
-	Announces the heading above the current member when focused.
-	"""
+
+class DiscordSectionedListItem(UIA):
+	"""Overlay for sidebar items that live under a section heading."""
+
+	#: How far back to look for the heading before giving up.  Each step is
+	#: a cross-process sibling lookup, and this runs on every focus change
+	#: in a sidebar, so keep it short -- a heading sits directly before the
+	#: first item of its section, and the steps past that only help when
+	#: Discord slips a separator in between.
+	SECTION_SEARCH_LIMIT = 3
+
+	def _findSectionHeading(self):
+		prev = self.previous
+		attempts = 0
+		while prev is not None and attempts < self.SECTION_SEARCH_LIMIT:
+			role = uia.safe_role(prev)
+			if role in (controlTypes.Role.HEADING, controlTypes.Role.GROUPING):
+				return uia.safe_name(prev)
+			prev_next = prev.previous
+			if prev_next is prev:
+				break
+			prev = prev_next
+			attempts += 1
+		return None
 
 	def event_gainFocus(self):
-		try:
-			prev = self.previous
-			attempts = 0
-			while prev and attempts < 5:
-				role = uia.safe_role(prev)
-				if role in (controlTypes.Role.HEADING, controlTypes.Role.GROUPING):
-					heading = uia.safe_name(prev)
-					if heading:
-						ui.message(heading)
-					break
-				prev_next = prev.previous
-				if prev_next is prev:
-					break
-				prev = prev_next
-				attempts += 1
-		except (COMError, Exception):
-			pass
+		global _lastSection
+		if _verbosity() >= 1:
+			try:
+				heading = self._findSectionHeading()
+				if heading and heading != _lastSection:
+					_lastSection = heading
+					ui.message(heading)
+			except (COMError, Exception):
+				log.debugWarning(
+					"Discord: section heading lookup failed", exc_info=True)
 		super().event_gainFocus()
+
 
 
 # ---------------------------------------------------------------------------
@@ -91,28 +121,27 @@ class DiscordMemberItem(UIA):
 def identify_overlay_class(obj):
 	"""Determine which overlay class (if any) should apply to *obj*.
 
-	PERFORMANCE: Only checks obj.role and obj.name — never walks
-	parents, children, or siblings.  Returns None for most objects.
+	PERFORMANCE: Only checks obj.role — never walks parents, children, or
+	siblings.  Returns None for most objects.
 	"""
 	try:
 		role = obj.role
 	except (COMError, AttributeError, Exception):
 		return None
 
-	# Only consider list items and articles — the vast majority of
-	# Discord objects are other types and can skip immediately.
-	if role not in (
-		controlTypes.Role.LISTITEM,
-		controlTypes.Role.TREEVIEWITEM,
-		controlTypes.Role.ARTICLE,
-	):
-		return None
-
-	# We can't cheaply determine WHICH region the item is in without
-	# walking parents.  Instead, return DiscordMessageItem for
-	# ARTICLE elements (Discord messages use role="article" in
-	# recent versions) and None for everything else.
+	# Discord messages are exposed as articles.
 	if role == controlTypes.Role.ARTICLE:
 		return DiscordMessageItem
+
+	# The server list is the only tree Discord exposes, so a tree item is
+	# a server.  If a future build exposes the channel list as a tree too,
+	# the voice indicator is still the right thing to report there.
+	if role == controlTypes.Role.TREEVIEWITEM:
+		return DiscordServerItem
+
+	# Every sidebar -- channels, DMs, members, forum posts -- is a list of
+	# list items grouped under headings.
+	if role == controlTypes.Role.LISTITEM:
+		return DiscordSectionedListItem
 
 	return None

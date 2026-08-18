@@ -134,7 +134,9 @@ def cmd_voiceServers():
 		return
 	active = []
 	for srv in servers:
-		name = uia.safe_name(srv)
+		# Read the plain name: the server overlay appends its own voice
+		# indicator, which this command is about to report in full.
+		name = uia.base_name(srv)
 		if not name:
 			continue
 		participants = uia.get_voice_participants_from_server(srv)

@@ -286,6 +286,27 @@ def safe_name(obj):
 		return ""
 
 
+def base_name(obj):
+	"""Return an object's own accessible name, bypassing add-on overlays.
+
+	safe_name() reads obj.name, which NVDA routes through whichever overlay
+	class is attached.  Two of this add-on's overlays compute their name
+	from the object itself, so going back through obj.name from inside them
+	-- or from a helper they call -- re-enters the getter before its cache
+	is populated and recurses until the stack runs out.  Read the underlying
+	UIA name instead, and fall back to obj.name for anything that is not a
+	UIA object.
+	"""
+	try:
+		return obj.UIAElement.CurrentName or ""
+	except (COMError, AttributeError, Exception):
+		pass
+	try:
+		return obj.name or ""
+	except (COMError, AttributeError, Exception):
+		return ""
+
+
 def safe_role(obj):
 	try:
 		return obj.role
@@ -1417,7 +1438,7 @@ def get_messages(message_list=None):
 
 
 def read_message_content(msg_obj):
-	name = safe_name(msg_obj)
+	name = base_name(msg_obj)
 	if name:
 		return name
 	parts = []
@@ -1458,7 +1479,7 @@ def has_voice_activity(server_obj):
 	this by filtering out known non-participant children (badges,
 	the server name itself, etc.) and checking if any remain.
 	"""
-	server_name = (safe_name(server_obj) or "").lower()
+	server_name = base_name(server_obj).lower()
 
 	# Patterns for children that are NOT voice participants
 	_BADGE_PATTERNS = (
@@ -1467,7 +1488,7 @@ def has_voice_activity(server_obj):
 
 	participant_names = []
 	for child in _iter_children(server_obj):
-		child_name = safe_name(child) or ""
+		child_name = base_name(child)
 		if not child_name:
 			continue
 		lower = child_name.lower().strip()
@@ -1498,7 +1519,7 @@ def has_voice_activity(server_obj):
 
 def get_voice_participants_from_server(server_obj):
 	"""Return list of voice participant names from a server item."""
-	server_name = (safe_name(server_obj) or "").lower()
+	server_name = base_name(server_obj).lower()
 
 	_BADGE_PATTERNS = (
 		"new", "mention", "mentions", "unread", "level",
@@ -1506,7 +1527,7 @@ def get_voice_participants_from_server(server_obj):
 
 	participants = []
 	for child in _iter_children(server_obj):
-		child_name = safe_name(child) or ""
+		child_name = base_name(child)
 		if not child_name:
 			continue
 		lower = child_name.lower().strip()
