@@ -75,23 +75,92 @@ _STATUS_SUFFIXES_LOWER = (
 # Standalone timestamp pattern like "9:04 AM"
 _TIMESTAMP_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)?$', re.IGNORECASE)
 
-# Discord occasionally puts its entire window's accessible name after a
-# short notification.  This stable run of title-bar controls marks where
-# that unrelated UI begins.
-_DISCORD_CHROME_TAIL_RE = re.compile(
-	r"\s+go back\s+go forward\s+minimize\s+maximize\s+close(?:\s+|$)",
+# Discord occasionally exposes a live region high enough in its tree that
+# the accessible name it hands NVDA is the whole window: a short
+# notification followed by every visible control.  The chrome half of that
+# text is a run of title-bar and navigation control names, but the exact
+# run varies -- items such as "inbox" come and go between builds, the window
+# buttons use UK or US spelling depending on the Discord locale, and the
+# sidebar labels differ between the DM list and a server.  Matching one
+# fixed sequence therefore missed most real cases, so instead detect a
+# *cluster* of chrome names appearing close together and cut the text there.
+_CHROME_TOKEN_RE = re.compile(
+	r"\b(?:"
+	r"go back|go forward|inbox|"
+	r"minimi[sz]e|maximi[sz]e|unmaximi[sz]e|restore down|"
+	r"servers sidebar|server list|channels sidebar|channel list|"
+	r"direct messages|add a server|download apps|"
+	r"explore discoverable servers|"
+	r"user settings|user area|toolbar|title bar|menu bar"
+	r")\b",
 	re.IGNORECASE,
 )
+# Characters of unrelated text tolerated between two chrome names before
+# they stop counting as part of the same run.
+_CHROME_RUN_GAP = 40
+# Chrome names that must cluster before the text is treated as window
+# chrome.  Every name in the pattern above is one a person is unlikely to
+# write in a sentence, and Discord's chrome always contributes several, so
+# two neighbours are enough to be confident without catching real messages.
+_CHROME_RUN_MIN = 2
+
+# Unread and mention badges.  Discord fires these as live-region changes on
+# the server and DM lists whenever a message arrives in a conversation the
+# user is not currently viewing, e.g. "1 mention, Cosmic Loop Productions".
+# They are status, not content, so announcing them interrupts the user with
+# something the unread counts in NVDA+T already report on demand.
+_BADGE_COUNT_RE = re.compile(
+	r"\b\d+\s+(?:mention|unread|unread message|notification|new message|ping)s?\b",
+	re.IGNORECASE,
+)
+_BADGE_PHRASE_RE = re.compile(
+	r"^(?:(?:unread|new)\s+messages?|unread|mark as read)\b",
+	re.IGNORECASE,
+)
+
+
+def _findChromeRunStart(text):
+	"""Return the offset where a run of window-chrome names begins, or -1."""
+	matches = list(_CHROME_TOKEN_RE.finditer(text))
+	if len(matches) < _CHROME_RUN_MIN:
+		return -1
+	run = [matches[0]]
+	for match in matches[1:]:
+		if match.start() - run[-1].end() <= _CHROME_RUN_GAP:
+			run.append(match)
+			continue
+		if len(run) >= _CHROME_RUN_MIN:
+			return run[0].start()
+		run = [match]
+	if len(run) >= _CHROME_RUN_MIN:
+		return run[0].start()
+	return -1
 
 
 def _trimDiscordChrome(text):
 	"""Remove a Discord window chrome suffix from an event announcement."""
 	if not text:
 		return text
-	match = _DISCORD_CHROME_TAIL_RE.search(text)
-	if match:
-		return text[:match.start()].strip()
+	start = _findChromeRunStart(text)
+	if start >= 0:
+		return text[:start].strip(" \t\r\n,;:")
 	return text.strip()
+
+
+def _isUnreadBadge(text):
+	"""Return True if *text* is an unread/mention badge rather than content."""
+	stripped = text.strip().strip(",").strip()
+	if not stripped:
+		return False
+	if _BADGE_PHRASE_RE.search(stripped):
+		return True
+	match = _BADGE_COUNT_RE.search(stripped)
+	if not match:
+		return False
+	# A badge leads or trails with its count ("1 mention, My Server" or
+	# "My Server, 1 mention").  A message that merely happens to contain a
+	# count keeps its own words on both sides of it, so leave that alone.
+	return match.start() == 0 or match.end() == len(stripped)
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +451,13 @@ class AppModule(appModuleHandler.AppModule):
 			return config.conf["discordAddon"]["announceChatMessages"]
 		except (KeyError, Exception):
 			return True
+
+	def _shouldAnnounceBadges(self):
+		"""Return whether unread/mention badge changes should be spoken."""
+		try:
+			return config.conf["discordAddon"]["announceMentionAlerts"]
+		except (KeyError, Exception):
+			return False
 
 	# ------------------------------------------------------------------
 	# UIA polling — background thread
@@ -679,6 +755,30 @@ class AppModule(appModuleHandler.AppModule):
 			return bool(body)
 		return len(name) >= 3 and not _TIMESTAMP_RE.match(name.strip())
 
+	def _announceEventText(self, text):
+		"""Screen a live-region or alert payload before it reaches speech.
+
+		Event payloads are far dirtier than the polled message list: Discord
+		fires them for unread badges anywhere in the app and sometimes hands
+		over the accessible name of a large part of the window.  Everything
+		that is not conversation content is dropped here, so the poll path's
+		filtering stays focused on message text.
+		"""
+		if not text:
+			return
+		text = _trimDiscordChrome(text)
+		if not text:
+			return
+		# A payload still carrying chrome names after trimming is a window
+		# dump whose leading notification we failed to isolate.  Speaking it
+		# would read out the interface, so drop it -- the poll loop still
+		# announces the message itself if one arrived.
+		if len(_CHROME_TOKEN_RE.findall(text)) >= 2:
+			return
+		if _isUnreadBadge(text) and not self._shouldAnnounceBadges():
+			return
+		self._filterAndAnnounce(text)
+
 	def _filterAndAnnounce(self, name):
 		"""Filter out non-message text and announce if new."""
 		lower = name.lower()
@@ -716,8 +816,14 @@ class AppModule(appModuleHandler.AppModule):
 		self._lastPollText = text
 		self._doAnnounce(text)
 
-	def _doAnnounce(self, text):
-		"""Format and speak the message text at highest priority."""
+	def _doAnnounce(self, text, interrupt=False):
+		"""Format and speak the message text.
+
+		Incoming messages are queued rather than spoken at Spri.NOW so a
+		message arriving mid-sentence no longer cuts off whatever the user
+		was reading.  Only reads the user asked for (Alt+1 .. Alt+0) still
+		interrupt, because there the interruption is the intent.
+		"""
 		# IAccessible format → "username: body"
 		if ' , ' in text:
 			parts = text.split(' , ')
@@ -729,7 +835,8 @@ class AppModule(appModuleHandler.AppModule):
 		else:
 			formatted = text
 		try:
-			speech.speak([formatted], priority=speech.Spri.NOW)
+			priority = speech.Spri.NOW if interrupt else speech.Spri.NORMAL
+			speech.speak([formatted], priority=priority)
 		except Exception as e:
 			log.warning("Discord Enhancements: speech error: %s" % e)
 
@@ -753,7 +860,7 @@ class AppModule(appModuleHandler.AppModule):
 		if idx < 0:
 			ui.message("Message %d not available" % n)
 			return
-		self._doAnnounce(messages[idx])
+		self._doAnnounce(messages[idx], interrupt=True)
 
 	def script_readMessage1(self, gesture):
 		"""Read the most recent message."""
@@ -816,14 +923,14 @@ class AppModule(appModuleHandler.AppModule):
 			if not text:
 				text = uia.read_message_content(obj)
 			if text and text != "(empty message)":
-				self._filterAndAnnounce(_trimDiscordChrome(text))
+				self._announceEventText(text)
 
 	def event_alert(self, obj, nextHandler):
 		"""Replace Discord's default alert announcement with filtered text."""
 		if self._shouldAnnounce():
 			text = uia.safe_name(obj) or uia.safe_value(obj) or ""
 			if text:
-				self._filterAndAnnounce(_trimDiscordChrome(text))
+				self._announceEventText(text)
 
 	# ------------------------------------------------------------------
 	# Master capture function -- handles ALL command-layer logic

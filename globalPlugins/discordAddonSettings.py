@@ -25,6 +25,7 @@ import wx
 _CONFSPEC = {
 	"commandPrefix": 'string(default="[")',
 	"announceChatMessages": "boolean(default=True)",
+	"announceMentionAlerts": "boolean(default=False)",
 	"verbosityLevel": "integer(default=1, min=0, max=3)",
 }
 
@@ -77,6 +78,18 @@ class DiscordAddonSettingsPanel(SettingsPanel):
 		)
 		self.announceChatCheckBox.SetValue(
 			config.conf["discordAddon"]["announceChatMessages"]
+		)
+
+		# --- Announce unread and mention badges ---
+		self.announceMentionsCheckBox = sHelper.addItem(
+			wx.CheckBox(
+				self,
+				# Translators: label for the announce mention alerts checkbox
+				label="Announce unread and &mention alerts",
+			)
+		)
+		self.announceMentionsCheckBox.SetValue(
+			config.conf["discordAddon"]["announceMentionAlerts"]
 		)
 
 		# --- Verbosity level ---
@@ -135,6 +148,9 @@ class DiscordAddonSettingsPanel(SettingsPanel):
 		config.conf["discordAddon"]["commandPrefix"] = new_prefix
 		config.conf["discordAddon"]["announceChatMessages"] = (
 			self.announceChatCheckBox.IsChecked()
+		)
+		config.conf["discordAddon"]["announceMentionAlerts"] = (
+			self.announceMentionsCheckBox.IsChecked()
 		)
 		config.conf["discordAddon"]["verbosityLevel"] = (
 			self.verbosityChoice.GetSelection()
