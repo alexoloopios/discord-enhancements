@@ -198,6 +198,7 @@ COMMAND_REGISTRY = [
 	("s",       commands.cmd_serverList,        "Move focus to server list"),
 	("n",       commands.cmd_navigateAreas,     "Cycle focus among Discord areas"),
 	("u",       commands.cmd_userArea,          "Move focus to user area"),
+	("i",       commands.cmd_inbox,             "Open the Inbox"),
 	# --- Chat messages (home-row) ---
 	("h",       commands.cmd_firstMessage,     "First message"),
 	("j",       commands.cmd_prevMessage,      "Previous message"),
@@ -218,12 +219,27 @@ COMMAND_REGISTRY = [
 	("shift+p",         commands.cmd_pinnedMessages,      "Open pinned messages"),
 	("shift+t",         commands.cmd_threadList,           "Toggle thread list"),
 	("shift+d",         commands.cmd_toggleAnnounce,       "Toggle message announcements"),
+	("shift+n",         commands.cmd_navigateAreasBack,    "Cycle focus backward among Discord areas"),
+	("shift+v",         commands.cmd_virtualizeMessage,    "Show current message in a browseable window"),
 	# --- Voice ---
 	("d",       commands.cmd_disconnect,       "Disconnect from voice"),
 	("p",       commands.cmd_ping,             "Report ping / latency"),
+	# --- Recent messages (read without moving the cursor) ---
+	("1",       lambda: commands.cmd_recentMessage(1),   "Read most recent message"),
+	("2",       lambda: commands.cmd_recentMessage(2),   "Read 2nd most recent message"),
+	("3",       lambda: commands.cmd_recentMessage(3),   "Read 3rd most recent message"),
+	("4",       lambda: commands.cmd_recentMessage(4),   "Read 4th most recent message"),
+	("5",       lambda: commands.cmd_recentMessage(5),   "Read 5th most recent message"),
+	("6",       lambda: commands.cmd_recentMessage(6),   "Read 6th most recent message"),
+	("7",       lambda: commands.cmd_recentMessage(7),   "Read 7th most recent message"),
+	("8",       lambda: commands.cmd_recentMessage(8),   "Read 8th most recent message"),
+	("9",       lambda: commands.cmd_recentMessage(9),   "Read 9th most recent message"),
+	("0",       lambda: commands.cmd_recentMessage(10),  "Read 10th most recent message"),
 	# --- Information ---
 	("t",       commands.cmd_typing,           "Who is typing"),
 	("w",       commands.cmd_channelInfo,       "Channel / DM information"),
+	("q",       commands.cmd_addonInfo,        "Announce add-on version and prefix key"),
+	("f1",      commands.cmd_openDocumentation, "Open the add-on documentation"),
 	# --- Diagnostic ---
 	("control+e",  commands.cmd_diagnostic,    "Dump accessibility tree"),
 	("control+m",  commands.cmd_messageDebug,  "Message list diagnostic"),

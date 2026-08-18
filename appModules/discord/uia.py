@@ -764,6 +764,10 @@ _THREADS_NAMES = [
 	"threads", "thread list", "show threads",
 ]
 
+_INBOX_NAMES = [
+	"inbox", "notifications inbox", "mentions",
+]
+
 
 def _log_missing(what):
 	log.debugWarning(
@@ -1261,6 +1265,49 @@ def find_threads_button(root=None):
 	if not btn:
 		log.debugWarning("Threads button not found")
 	return btn
+
+
+def find_inbox_button(root=None):
+	btn = find_button_by_name(_INBOX_NAMES, root)
+	if not btn:
+		log.debugWarning("Inbox button not found")
+	return btn
+
+
+def get_message_extras(msg_obj, max_depth=2):
+	"""Return reaction and poll detail attached to *msg_obj*.
+
+	Discord hangs reactions off a message as buttons named things like
+	"3 reactions, thumbs up", and renders polls as children carrying vote
+	counts.  Neither ends up in the message's own accessible name, so they
+	are collected here on demand.  Only called from explicit commands --
+	this walks the message subtree and must never run from an event.
+	"""
+	extras = []
+	seen = set()
+
+	def _collect(obj, depth):
+		if depth > max_depth:
+			return
+		for child in _iter_children(obj):
+			name = safe_name(child) or ""
+			lower = name.lower()
+			if name and name not in seen:
+				if (
+					"reaction" in lower
+					or "vote" in lower
+					or lower.startswith("poll")
+					or " poll" in lower
+				):
+					seen.add(name)
+					extras.append(name)
+			_collect(child, depth + 1)
+
+	try:
+		_collect(msg_obj, 1)
+	except (COMError, Exception):
+		log.debugWarning("Error reading message extras", exc_info=True)
+	return extras
 
 
 def find_typing_indicator(root=None):

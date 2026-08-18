@@ -11,6 +11,7 @@ import time
 from comtypes import COMError
 from logHandler import log
 import api
+import config
 import controlTypes
 import tones
 import ui
@@ -59,6 +60,14 @@ def _clamp_cursor(index, count):
 	return max(0, min(index, count - 1))
 
 
+def _get_verbosity():
+	"""Return the configured verbosity level (0 minimal .. 3 extra verbose)."""
+	try:
+		return config.conf["discordAddon"]["verbosityLevel"]
+	except (KeyError, Exception):
+		return 1
+
+
 def _speak_message(index, messages=None):
 	global _message_cursor, _last_current_msg_time
 	if messages is None:
@@ -69,9 +78,19 @@ def _speak_message(index, messages=None):
 	index = _clamp_cursor(index, len(messages))
 	_message_cursor = index
 	msg = messages[index]
-	content = uia.read_message_content(msg)
-	position = "Message %d of %d" % (index + 1, len(messages))
-	ui.message("%s. %s" % (position, content))
+	verbosity = _get_verbosity()
+	parts = []
+	# Minimal drops the position, which is the noisiest part of a message
+	# read when moving quickly through history.
+	if verbosity >= 1:
+		parts.append("Message %d of %d" % (index + 1, len(messages)))
+	parts.append(uia.read_message_content(msg))
+	# Verbose adds reactions and poll results, which the JAWS scripts
+	# report while navigating.  Reading them costs a subtree walk, so it
+	# stays off at the default level.
+	if verbosity >= 2:
+		parts.extend(uia.get_message_extras(msg))
+	ui.message(". ".join(parts))
 	_last_current_msg_time = time.time()
 
 
@@ -192,33 +211,46 @@ def cmd_serverList():
 
 
 # Navigation area cycling — stored index avoids slow parent-chain walk
-_nav_area_index = 0
+_nav_area_current = -1
 
 
-def cmd_navigateAreas():
-	"""[ N — Cycle focus among major Discord areas."""
-	global _nav_area_index
+def _navigateAreas(step):
+	"""Move focus to the next (step 1) or previous (step -1) Discord area."""
+	global _nav_area_current
 	areas = uia.find_all_areas()
 
 	if not areas:
 		ui.message("No navigable area found.")
 		return
 
-	# Wrap index if areas changed
-	if _nav_area_index >= len(areas):
-		_nav_area_index = 0
+	count = len(areas)
+	if 0 <= _nav_area_current < count:
+		start = _nav_area_current
+	else:
+		# No usable position yet: entering forwards should land on the
+		# first area, entering backwards on the last.
+		start = -1 if step > 0 else 0
 
-	# Try each area starting from the stored index
-	for attempt in range(len(areas)):
-		target_idx = (_nav_area_index + attempt) % len(areas)
+	# Skip past any area that refuses focus rather than giving up on it.
+	for attempt in range(1, count + 1):
+		target_idx = (start + step * attempt) % count
 		name, region = areas[target_idx]
 		if uia.focus_element(region):
 			ui.message(name)
-			# Advance index for next invocation
-			_nav_area_index = (target_idx + 1) % len(areas)
+			_nav_area_current = target_idx
 			return
 
 	ui.message("No navigable area found.")
+
+
+def cmd_navigateAreas():
+	"""[ N — Cycle focus forward among major Discord areas."""
+	_navigateAreas(1)
+
+
+def cmd_navigateAreasBack():
+	"""[ Shift+N — Cycle focus backward among major Discord areas."""
+	_navigateAreas(-1)
 
 
 def cmd_userArea():
@@ -389,8 +421,6 @@ def cmd_ping():
 
 def cmd_toggleAnnounce():
 	"""[ Shift+D — Toggle automatic incoming message announcements."""
-	import config
-	from logHandler import log
 	try:
 		current = config.conf["discordAddon"]["announceChatMessages"]
 	except KeyError:
@@ -469,6 +499,131 @@ def cmd_threadList():
 			ui.message("Could not toggle the thread list.")
 	else:
 		ui.message("Threads button not found.")
+
+
+# ---------------------------------------------------------------------------
+# Message presentation
+# ---------------------------------------------------------------------------
+
+def cmd_virtualizeMessage():
+	"""[ Shift+V — Show the current message in a browseable window.
+
+	The counterpart to the JAWS scripts' virtualise command: the message is
+	rendered into NVDA's browseable message window, where the user can read
+	it with review commands, copy from it, and reach text that speech runs
+	together.
+	"""
+	if not _last_messages or _message_cursor < 0:
+		messages = _refresh_messages()
+		if not messages:
+			ui.message("No messages available.")
+			return
+		index = len(messages) - 1
+	else:
+		messages = _last_messages
+		index = _clamp_cursor(_message_cursor, len(messages))
+
+	msg = messages[index]
+	lines = [uia.read_message_content(msg)]
+	lines.extend(uia.get_message_extras(msg))
+	try:
+		ui.browseableMessage(
+			"\n".join(lines),
+			"Discord message %d of %d" % (index + 1, len(messages)),
+		)
+	except (COMError, Exception):
+		log.debugWarning("browseableMessage failed", exc_info=True)
+		ui.message("Could not display the message.")
+
+
+# ---------------------------------------------------------------------------
+# Inbox
+# ---------------------------------------------------------------------------
+
+def cmd_inbox():
+	"""[ I — Open Discord's Inbox.
+
+	Presses the Inbox button when it can be located; otherwise falls back to
+	Discord's own Control+I binding, which works even when the button is
+	hidden behind a collapsed title bar.
+	"""
+	btn = uia.find_inbox_button()
+	if btn:
+		try:
+			btn.doAction()
+			ui.message("Inbox")
+			return
+		except (COMError, Exception):
+			log.debugWarning("Error pressing the Inbox button", exc_info=True)
+
+	try:
+		from keyboardHandler import KeyboardInputGesture
+		KeyboardInputGesture.fromName("control+i").send()
+		ui.message("Inbox")
+	except (COMError, Exception):
+		log.debugWarning("Error sending control+i", exc_info=True)
+		ui.message("Could not open the Inbox.")
+
+
+# ---------------------------------------------------------------------------
+# Add-on information and help
+# ---------------------------------------------------------------------------
+
+def _readManifestValue(key):
+	"""Return a value from the add-on's manifest.ini, or None."""
+	path = os.path.join(
+		os.path.dirname(os.path.dirname(os.path.dirname(
+			os.path.abspath(__file__)))),
+		"manifest.ini",
+	)
+	try:
+		with open(path, "r", encoding="utf-8") as manifest:
+			for line in manifest:
+				name, sep, value = line.partition("=")
+				if sep and name.strip() == key:
+					return value.strip().strip('"')
+	except (OSError, UnicodeDecodeError):
+		log.debugWarning("Could not read manifest.ini", exc_info=True)
+	return None
+
+
+def cmd_addonInfo():
+	"""[ Q — Announce the add-on version and the active prefix key."""
+	version = _readManifestValue("version") or "unknown version"
+	try:
+		import config
+		prefix = config.conf["discordAddon"]["commandPrefix"]
+	except (KeyError, Exception):
+		prefix = "["
+	ui.message(
+		"Discord Enhancements %s. Command prefix: %s" % (version, prefix)
+	)
+
+
+def cmd_openDocumentation():
+	"""[ F1 — Open the add-on documentation in the default browser."""
+	base = os.path.dirname(os.path.dirname(os.path.dirname(
+		os.path.abspath(__file__))))
+	try:
+		import languageHandler
+		lang = languageHandler.getLanguage()
+	except Exception:
+		lang = "en"
+
+	candidates = []
+	for name in (lang, lang.split("_")[0], "en"):
+		if name:
+			candidates.append(os.path.join(base, "doc", name, "readme.html"))
+	candidates.append(os.path.join(base, "README.md"))
+
+	for path in candidates:
+		if os.path.isfile(path):
+			try:
+				os.startfile(path)
+				return
+			except OSError:
+				log.debugWarning("Could not open %s" % path, exc_info=True)
+	ui.message("Documentation not found.")
 
 
 # ---------------------------------------------------------------------------
