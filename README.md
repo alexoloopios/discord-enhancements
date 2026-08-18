@@ -126,7 +126,11 @@ Change the prefix key used to enter the command layer. The default is `[`. You m
 
 ### Announce Incoming Chat Messages
 
-When enabled (default), newly arriving messages in the focused channel are spoken automatically via live-region change events.
+When enabled (default), newly arriving messages in the focused channel are spoken automatically via live-region change events. Announcements are queued rather than spoken immediately, so an arriving message no longer cuts off whatever NVDA is reading.
+
+### Announce Unread and Mention Alerts
+
+When a message arrives in a server or DM you are not currently viewing, Discord raises an alert such as "1 mention, My Server". These are disabled by default, since they interrupt regardless of where you are in the app; the same unread counts are available on demand from the enhanced title (`NVDA+T`). Enable this option if you want them spoken as they happen.
 
 ### Verbosity Level
 
